@@ -109,14 +109,15 @@ resources:
       tasks:
         - task_key: run_pipeline
           description: "Generate payments, evaluate fraud, and populate medallion layers"
-          new_cluster:
-            spark_version: "14.3.x-scala2.12"
-            node_type_id: "i3.xlarge"
-            num_workers: 2
+          compute_key: serverless
           libraries:
             - whl: ./bundle/python/teksystems_walkthrough-0.1.0-py3-none-any.whl
           notebook_task:
             notebook_path: ./bundle/sql/medallion_pipeline.py
+       
+      compute:
+        serverless:
+          kind: Serverless
 
 targets:
   dev:
