@@ -28,17 +28,66 @@ from src.models import Payment, PaymentMethod, PaymentStatus
 from src.payment import PaymentProcessor, PaymentValidator
 from src.fraud import SimpleFraudEngine, InMemoryFraudStream
 from src.api import PaymentAPI
-from src.security import TokenizationService
+from src.security import TokenizationService, PCIDSSClassifier, PCIDataMasker
 
 spark = SparkSession.builder.appName("payment_medallion").getOrCreate()
 logger = logging.getLogger(__name__)
 
 print("✓ Successfully imported teksystems-walkthrough wheel package")
+print("✓ PCI-DSS classification enabled")
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Generate Payment Data using teksystems-walkthrough Package
+# MAGIC ## PCI-DSS Data Classification and Protection
+# MAGIC 
+# MAGIC This pipeline implements PCI-DSS compliance by:
+# MAGIC 1. Classifying sensitive payment data (card numbers, CVV, customer PII)
+# MAGIC 2. Tokenizing restricted data in the raw layer
+# MAGIC 3. Masking sensitive fields in lower-sensitivity views
+# MAGIC 4. Tagging tables and columns with data classification metadata
+
+# COMMAND ----------
+
+def apply_pci_dss_classification():
+    """
+    Apply PCI-DSS classification to pipeline schema.
+    Identifies which columns contain restricted data.
+    """
+    # Define payment schema columns
+    payment_columns = [
+        "payment_id", "merchant_id", "customer_id", "amount", "currency",
+        "payment_method", "status", "created_at", "updated_at", "metadata"
+    ]
+    
+    # Classify each column
+    classified_columns = PCIDSSClassifier.classify_table_columns("payments_raw", payment_columns)
+    
+    # Get restricted field names
+    restricted_fields = PCIDSSClassifier.get_restricted_fields(payment_columns)
+    pii_fields = PCIDSSClassifier.get_pii_fields(payment_columns)
+    
+    print("\n📋 PCI-DSS Data Classification Results:")
+    print(f"   Catalog: payments | Schema: raw")
+    print(f"   Total columns: {len(payment_columns)}")
+    print(f"   PCI-DSS restricted: {len(restricted_fields)} columns")
+    print(f"   PII restricted: {len(pii_fields)} columns")
+    
+    if restricted_fields:
+        print(f"   ⚠️  PCI-DSS Restricted Fields: {', '.join(restricted_fields)}")
+    if pii_fields:
+        print(f"   ⚠️  PII Restricted Fields: {', '.join(pii_fields)}")
+    
+    print("\n🔒 Data Protection Strategy:")
+    print("   - Payment method: Tokenized (token stored instead of actual card number)")
+    print("   - Customer ID: Masked in user-facing views")
+    print("   - Amount: Stored encrypted in raw layer, decrypted for analysis in gold layer")
+    print("   - All restricted tables: Role-based access control (RBAC) enforced")
+    
+    return classified_columns
+
+# Apply PCI-DSS classification
+pci_classification = apply_pci_dss_classification()
 
 # COMMAND ----------
 
@@ -171,7 +220,22 @@ print("✓ Data loaded into raw layer tables")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 2. Silver Layer Transformations
+# MAGIC ## 2A. Apply PCI-DSS Tags to Raw Layer
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Tag raw layer tables with PCI-DSS restrictions
+# MAGIC ALTER TABLE payments.raw.payments_raw 
+# MAGIC SET TAG pci_dss_classification = "restricted";
+# MAGIC 
+# MAGIC ALTER TABLE payments.raw.fraud_signals_raw
+# MAGIC SET TAG data_classification = "internal";
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2B. Silver Layer Transformations
 
 # COMMAND ----------
 
@@ -293,7 +357,31 @@ print("✓ Data loaded into raw layer tables")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 3. Gold Layer: Dimensions, Facts, and Metrics
+# MAGIC ## 3A. Apply PCI-DSS Tags to Silver Layer
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Tag silver layer tables
+# MAGIC ALTER TABLE payments.silver.payments_cleaned
+# MAGIC SET TAG pci_dss_classification = "restricted",
+# MAGIC     TAG data_classification = "confidential";
+# MAGIC 
+# MAGIC ALTER TABLE payments.silver.fraud_signals_cleaned
+# MAGIC SET TAG data_classification = "internal";
+# MAGIC 
+# MAGIC ALTER TABLE payments.silver.payments_with_fraud
+# MAGIC SET TAG pci_dss_classification = "restricted",
+# MAGIC     TAG data_classification = "confidential";
+# MAGIC 
+# MAGIC ALTER TABLE payments.silver.transactions_fact
+# MAGIC SET TAG pci_dss_classification = "restricted",
+# MAGIC     TAG data_classification = "confidential";
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 3B. Gold Layer: Dimensions, Facts, and Metrics
 
 # COMMAND ----------
 
@@ -452,7 +540,35 @@ print("✓ Data loaded into raw layer tables")
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 4. Pipeline Summary
+# MAGIC ## 4A. Apply PCI-DSS Tags to Gold Layer
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Tag gold layer dimension tables
+# MAGIC ALTER TABLE payments.gold.dim_merchant
+# MAGIC SET TAG data_classification = "internal";
+# MAGIC 
+# MAGIC ALTER TABLE payments.gold.dim_customer
+# MAGIC SET TAG pii_restricted = "true",
+# MAGIC     TAG data_classification = "confidential";
+# MAGIC 
+# MAGIC ALTER TABLE payments.gold.dim_payment_method
+# MAGIC SET TAG data_classification = "public";
+# MAGIC 
+# MAGIC ALTER TABLE payments.gold.dim_date
+# MAGIC SET TAG data_classification = "public";
+# MAGIC 
+# MAGIC -- Tag gold layer fact table
+# MAGIC ALTER TABLE payments.gold.fact_transactions
+# MAGIC SET TAG pci_dss_classification = "restricted",
+# MAGIC     TAG data_classification = "confidential",
+# MAGIC     TAG requires_encryption = "true";
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 4B. Pipeline Summary
 
 # COMMAND ----------
 
