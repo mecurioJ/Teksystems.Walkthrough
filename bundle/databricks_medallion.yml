@@ -1,0 +1,122 @@
+# Databricks Asset Bundle: Payment Processing Data Medallion
+# This bundle defines the medallion architecture for payment data
+
+bundle:
+  name: Teksystems.Walkthrough
+
+resources:
+  catalogs:
+    payments_catalog:
+      name: payments
+      comment: "Payments processing catalog with medallion architecture"
+
+  schemas:
+    # RAW Layer - Inbound streams
+    raw_schema:
+      name: raw
+      catalog_name: payments
+      comment: "Raw data from payment processor and fraud engine streams"
+
+    # SILVER Layer - Transformations
+    silver_schema:
+      name: silver
+      catalog_name: payments
+      comment: "Cleaned and transformed payment data"
+
+    # GOLD Layer - Analytics
+    gold_schema:
+      name: gold
+      catalog_name: payments
+      comment: "Business-ready dimensions, facts, and metrics"
+
+  volumes:
+    # General Ledger reconciliation volume
+    gl_volume:
+      name: gl_reconciliation
+      catalog_name: payments
+      schema_name: raw
+      volume_type: EXTERNAL
+      comment: "General Ledger files for payment reconciliation"
+
+  tables:
+    # RAW LAYER TABLES
+    # Payment transactions from processor
+    payments_raw:
+      name: payments_raw
+      catalog_name: payments
+      schema_name: raw
+      table_type: EXTERNAL
+      comment: "Raw payment transactions from processor"
+      columns:
+        - name: payment_id
+          type: STRING
+          comment: "Unique payment identifier"
+        - name: merchant_id
+          type: STRING
+        - name: customer_id
+          type: STRING
+        - name: amount
+          type: DECIMAL(18,2)
+        - name: currency
+          type: STRING
+        - name: payment_method
+          type: STRING
+        - name: status
+          type: STRING
+        - name: created_at
+          type: TIMESTAMP
+        - name: updated_at
+          type: TIMESTAMP
+        - name: metadata
+          type: STRING
+
+    # Fraud signals from fraud engine
+    fraud_signals_raw:
+      name: fraud_signals_raw
+      catalog_name: payments
+      schema_name: raw
+      table_type: EXTERNAL
+      comment: "Raw fraud signals from fraud detection engine"
+      columns:
+        - name: signal_id
+          type: STRING
+        - name: transaction_id
+          type: STRING
+        - name: risk_score
+          type: DECIMAL(3,2)
+        - name: risk_level
+          type: STRING
+        - name: alerts
+          type: ARRAY<STRING>
+        - name: decision
+          type: STRING
+        - name: case_status
+          type: STRING
+        - name: created_at
+          type: TIMESTAMP
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-05e93822-e87a.cloud.databricks.com
+    variables:
+      catalog_name: payments
+      environment: dev
+
+  staging:
+    mode: production
+    workspace:
+      host: https://dbc-05e93822-e87a.cloud.databricks.com
+    variables:
+      catalog_name: payments_staging
+      environment: staging
+
+  prod:
+    mode: production
+    workspace:
+      host: https://dbc-05e93822-e87a.cloud.databricks.com
+    variables:
+      catalog_name: payments_prod
+      environment: prod
