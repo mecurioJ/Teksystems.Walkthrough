@@ -7,15 +7,35 @@ name = "teksystems-walkthrough"
 version = "0.1.0"
 description = "Learning project exploring payment gateway implementation patterns and best practices"
 readme = "README.md"
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 dependencies = []
+authors = [
+    {name = "Teksystems", email = "dev@teksystems.com"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries",
+]
 
 [tool.setuptools]
-packages = ["src"]
-package-dir = {"" = "."}
-
-[tool.setuptools.package-data]
-src = ["py.typed"]
+packages = [
+    "src",
+    "src.models",
+    "src.payment",
+    "src.transactions",
+    "src.security",
+    "src.fraud",
+    "src.api",
+    "src.utils",
+]
 
 [project.optional-dependencies]
 dev = [
