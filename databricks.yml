@@ -5,8 +5,27 @@
 bundle:
   name: Teksystems.Walkthrough
 
-# Main infrastructure resources - catalogs, schemas, tables
-resources: {}
+resources:
+  jobs:
+    data_generation_pipeline:
+      name: Data Generation Pipeline
+      description: Generate sample payment and fraud data for medallion architecture
+      tasks:
+        - task_key: generate_data
+          notebook_task:
+            notebook_path: ./bundle/python_pipelines/data_generation_pipeline.py
+          max_retries: 1
+          timeout_seconds: 3600
+      
+    sql_transformation_pipeline:
+      name: SQL Transformation Pipeline
+      description: Transform raw data to silver and gold layers
+      tasks:
+        - task_key: transform_data
+          notebook_task:
+            notebook_path: ./bundle/python_pipelines/sql_transformation_pipeline.py
+          max_retries: 1
+          timeout_seconds: 3600
 
 targets:
   dev:
