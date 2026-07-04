@@ -1,5 +1,6 @@
 # Databricks Asset Bundle: Payment Processing Data Medallion
 # This bundle defines the medallion architecture for payment data
+# Integrates teksystems-walkthrough wheel for end-to-end payment processing
 
 bundle:
   name: Teksystems.Walkthrough
@@ -56,7 +57,8 @@ resources:
         - name: customer_id
           type: STRING
         - name: amount
-          type: DECIMAL(18,2)
+          type: STRING
+          comment: "Decimal amount as string"
         - name: currency
           type: STRING
         - name: payment_method
@@ -64,9 +66,11 @@ resources:
         - name: status
           type: STRING
         - name: created_at
-          type: TIMESTAMP
+          type: STRING
+          comment: "ISO timestamp"
         - name: updated_at
-          type: TIMESTAMP
+          type: STRING
+          comment: "ISO timestamp"
         - name: metadata
           type: STRING
 
@@ -83,17 +87,36 @@ resources:
         - name: transaction_id
           type: STRING
         - name: risk_score
-          type: DECIMAL(3,2)
+          type: STRING
+          comment: "Risk score as decimal string"
         - name: risk_level
           type: STRING
         - name: alerts
-          type: ARRAY<STRING>
+          type: STRING
+          comment: "JSON array of alerts"
         - name: decision
           type: STRING
         - name: case_status
           type: STRING
         - name: created_at
-          type: TIMESTAMP
+          type: STRING
+          comment: "ISO timestamp"
+
+  jobs:
+    medallion_pipeline:
+      name: Payment Medallion Pipeline
+      description: "End-to-end payment processing pipeline with fraud detection"
+      tasks:
+        - task_key: run_pipeline
+          description: "Generate payments, evaluate fraud, and populate medallion layers"
+          new_cluster:
+            spark_version: "14.3.x-scala2.12"
+            node_type_id: "i3.xlarge"
+            num_workers: 2
+          libraries:
+            - whl: ./bundle/python/teksystems_walkthrough-0.1.0-py3-none-any.whl
+          notebook_task:
+            notebook_path: ./bundle/sql/medallion_pipeline.py
 
 targets:
   dev:

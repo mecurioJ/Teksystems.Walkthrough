@@ -1,51 +1,172 @@
 # Databricks notebook source
 # Payment Processing Medallion Architecture Pipeline
-# Orchestrates transformations from raw → silver → gold
+# End-to-end pipeline using teksystems-walkthrough package
 
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC # Medallion Architecture Pipeline
 # MAGIC 
-# MAGIC This notebook orchestrates the data transformations for the payment processing medallion architecture:
-# MAGIC 
-# MAGIC - **Raw Layer**: Inbound payment and fraud signals
-# MAGIC - **Silver Layer**: Cleaned, standardized, and enriched data
-# MAGIC - **Gold Layer**: Business-ready dimensions, facts, and analytics
+# MAGIC End-to-end payment processing pipeline:
+# MAGIC 1. Generate payment data using PaymentProcessor from teksystems-walkthrough wheel
+# MAGIC 2. Evaluate fraud using SimpleFraudEngine and emit signals
+# MAGIC 3. Load into raw layer (payments.raw)
+# MAGIC 4. Transform through silver layer (standardization, enrichment)
+# MAGIC 5. Create gold layer analytics (dimensions, facts, metrics)
 
 # COMMAND ----------
 
 from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType, TimestampType, ArrayType
 from datetime import datetime
 import logging
+import json
+from decimal import Decimal
+
+# Import from teksystems-walkthrough wheel
+from src.models import Payment, PaymentMethod, PaymentStatus
+from src.payment import PaymentProcessor, PaymentValidator
+from src.fraud import SimpleFraudEngine, InMemoryFraudStream
+from src.api import PaymentAPI
+from src.security import TokenizationService
 
 spark = SparkSession.builder.appName("payment_medallion").getOrCreate()
 logger = logging.getLogger(__name__)
 
+print("✓ Successfully imported teksystems-walkthrough wheel package")
+
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC ## 1. Validate Raw Data
+# MAGIC ## 1. Generate Payment Data using teksystems-walkthrough Package
 
 # COMMAND ----------
 
-def validate_raw_tables():
-    """Validate that raw tables exist and contain data"""
-    try:
-        # Check payments_raw
-        payment_count = spark.sql("SELECT COUNT(*) as cnt FROM payments.raw.payments_raw").collect()[0]['cnt']
-        logger.info(f"Payments raw table: {payment_count} records")
+def generate_payment_data(num_payments: int = 100) -> list:
+    """
+    Generate sample payment data using PaymentProcessor from teksystems-walkthrough.
+    
+    Args:
+        num_payments: Number of payments to generate
         
-        # Check fraud_signals_raw
-        fraud_count = spark.sql("SELECT COUNT(*) as cnt FROM payments.raw.fraud_signals_raw").collect()[0]['cnt']
-        logger.info(f"Fraud signals raw table: {fraud_count} records")
+    Returns:
+        List of payment dictionaries
+    """
+    processor = PaymentProcessor()
+    fraud_engine = SimpleFraudEngine(max_transaction_amount=Decimal("5000.00"))
+    fraud_stream = InMemoryFraudStream()
+    
+    payments_data = []
+    merchants = ["merchant_1", "merchant_2", "merchant_3", "merchant_4", "merchant_5"]
+    customers = [f"customer_{i}" for i in range(1, 11)]
+    methods = [PaymentMethod.CREDIT_CARD, PaymentMethod.DEBIT_CARD, PaymentMethod.ACH]
+    
+    import random
+    
+    for i in range(num_payments):
+        # Generate payment using PaymentProcessor
+        payment = processor.authorize(
+            amount=Decimal(str(round(random.uniform(10, 1000), 2))),
+            currency="USD",
+            method=random.choice(methods),
+            merchant_id=random.choice(merchants),
+            customer_id=random.choice(customers),
+            description=f"Payment {i+1}"
+        )
         
-        return payment_count > 0 or fraud_count > 0
-    except Exception as e:
-        logger.warning(f"Raw tables validation error: {e}")
-        return False
+        # Randomly capture some payments
+        if random.random() > 0.1:  # 90% capture rate
+            payment = processor.capture(payment)
+        
+        # Evaluate fraud
+        fraud_signal = fraud_engine.evaluate(payment)
+        fraud_stream.emit(fraud_signal)
+        
+        # Prepare payment record
+        payment_record = {
+            "payment_id": payment.id,
+            "merchant_id": payment.merchant_id,
+            "customer_id": payment.customer_id,
+            "amount": str(payment.amount),
+            "currency": payment.currency,
+            "payment_method": payment.method.value,
+            "status": payment.status.value,
+            "created_at": payment.created_at.isoformat(),
+            "updated_at": payment.updated_at.isoformat(),
+            "metadata": json.dumps({"source": "generator", "index": i})
+        }
+        payments_data.append(payment_record)
+    
+    # Get fraud signals
+    fraud_signals = fraud_stream.get_signals()
+    fraud_data = []
+    
+    for signal in fraud_signals:
+        fraud_record = {
+            "signal_id": f"signal_{signal.transaction_id}",
+            "transaction_id": signal.transaction_id,
+            "risk_score": float(signal.risk_score),
+            "risk_level": signal.risk_level.value,
+            "alerts": json.dumps([a.value for a in signal.alerts]),
+            "decision": signal.decision.value,
+            "case_status": signal.case_status.value,
+            "created_at": signal.created_at.isoformat()
+        }
+        fraud_data.append(fraud_record)
+    
+    return payments_data, fraud_data
 
-print(f"Raw tables validated: {validate_raw_tables()}")
+# Generate sample data
+print("Generating sample payment data...")
+payments_list, fraud_list = generate_payment_data(num_payments=100)
+print(f"✓ Generated {len(payments_list)} payments and {len(fraud_list)} fraud signals")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## 2. Load Generated Data into Raw Layer
+
+# COMMAND ----------
+
+from pyspark.sql.types import StructType, StructField, StringType, DecimalType, TimestampType, ArrayType
+
+# Define schemas for raw tables
+payments_schema = StructType([
+    StructField("payment_id", StringType(), False),
+    StructField("merchant_id", StringType(), False),
+    StructField("customer_id", StringType(), False),
+    StructField("amount", StringType(), False),
+    StructField("currency", StringType(), False),
+    StructField("payment_method", StringType(), False),
+    StructField("status", StringType(), False),
+    StructField("created_at", StringType(), False),
+    StructField("updated_at", StringType(), False),
+    StructField("metadata", StringType(), True)
+])
+
+fraud_schema = StructType([
+    StructField("signal_id", StringType(), False),
+    StructField("transaction_id", StringType(), False),
+    StructField("risk_score", StringType(), False),
+    StructField("risk_level", StringType(), False),
+    StructField("alerts", StringType(), False),
+    StructField("decision", StringType(), False),
+    StructField("case_status", StringType(), False),
+    StructField("created_at", StringType(), False)
+])
+
+# Create DataFrames
+payments_df = spark.createDataFrame(payments_list, schema=payments_schema)
+fraud_df = spark.createDataFrame(fraud_list, schema=fraud_schema)
+
+print(f"Payments DataFrame: {payments_df.count()} rows")
+print(f"Fraud DataFrame: {fraud_df.count()} rows")
+
+# Save to raw layer
+payments_df.write.mode("overwrite").saveAsTable("payments.raw.payments_raw")
+fraud_df.write.mode("overwrite").saveAsTable("payments.raw.fraud_signals_raw")
+
+print("✓ Data loaded into raw layer tables")
 
 # COMMAND ----------
 
